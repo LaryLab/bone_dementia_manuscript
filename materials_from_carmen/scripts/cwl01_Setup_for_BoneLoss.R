@@ -1,0 +1,371 @@
+
+# DIRECTORIES -------------------------------------------------------------
+
+home_dir <- dirname(dirname(rstudioapi::getActiveDocumentContext()$path))
+script_dir <- paste(home_dir, 'scripts', sep = '/')
+data_dir <- paste(home_dir, 'data', sep = '/')
+
+# LIBRARIES ---------------------------------------------------------------
+
+librarian::shelf(dplyr,
+                 haven,
+                 kinship2,
+                 plyr,
+                 tidyverse)
+#sys.source(paste(home_dir, 'utils.R', sep = '/'), envir = attach(NULL))
+sys.source(paste(script_dir, 'utils.R', sep = '/'), envir = attach(NULL))
+
+# FILES -------------------------------------------------------------------
+#
+# Recurring modifications to data files:
+# - Convert to data frame class only, instead of leaving it as tibble.
+#     This prevents the two-level column names that are common to SAS files;
+#     in SAS, you can specify a variable name and a label for that column.
+# - Change all column names to uppercase.
+#
+# *************************************************************************
+
+# Columns that are used to combine datasets.
+common_cols <- c('RANID', 'IDTYPE')
+
+# Files that contain information for both cohorts.
+common_files <- list(
+  'fhs_master_apoe_19.sas7bdat',
+  'vr_dates_2019_a_1175s_19.sas7bdat',
+  'vr_demsurv_2018_a_1281s_19.sas7bdat'
+)
+common_data <- lapply(setNames(common_files, common_files), function(f) {
+  output <- read_file_by_ext(f = f, path = data_dir) %>%
+    as.matrix() %>%
+    as.data.frame(stringsAsFactors = F) %>%
+    rename_with(., toupper) %>%
+    mutate(RANID = as.numeric(RANID),
+           IDTYPE = as.numeric(IDTYPE))
+  output
+})
+
+# Filenames for original cohort.
+orig_files <- list('bmd0_2009s_19.sas7bdat',
+                   'ex0_24s_v2_19.sas7bdat',
+                   'vr_wkthru_ex32_0_0997s_19.sas7bdat')
+orig_data <- lapply(setNames(orig_files, orig_files), read_file_by_ext, path = data_dir)
+
+off_files <- list(
+  't_bmd_ex07_1_0104s_v1_19.sas7bdat',
+  't_bmdhs_2008_1_0748s_19.sas7bdat',
+  'ex1_8s_19.sas7bdat',
+  'meno1_8s_19.sas7bdat',
+  'vr_wkthru_ex09_1_1001s_19.sas7bdat'
+)
+off_data <- lapply(setNames(off_files, off_files), read_file_by_ext, path = data_dir)
+
+# APOE --------------------------------------------------------------------
+#
+# We are primarily interested in whether a subject has at least one copy of
+#   the e4 allele (risk factor for dementia, especially AD).
+#
+# *************************************************************************
+
+common_data[['APOE']] <-
+  common_data[['fhs_master_apoe_19.sas7bdat']] %>%
+  # Subset only Original (IDTYPE = 0) and Offspring (IDTYPE = 1)
+  filter(IDTYPE %in% 0:1) %>%
+  # Status = 1 if at least one e4 allele
+  mutate(APOEStatus = case_when(grepl('4', APOE) ~ 1,
+                                TRUE ~ 0))
+
+# DATES -------------------------------------------------------------------
+
+common_data[['Dates']] <-
+  common_data[['vr_dates_2019_a_1175s_19.sas7bdat']] %>%
+  filter(IDTYPE %in% 0:1) %>%
+  # Create age columns to denote age at initial visit for both cohorts.
+  mutate(
+    AgeInit = case_when(
+      IDTYPE == 0 ~ AGE20,
+      IDTYPE == 1 ~ AGE6,
+      TRUE ~ NA_real_
+    ),
+    AgeBase = case_when(
+      IDTYPE == 0 ~ AGE24,
+      IDTYPE == 1 ~ AGE8,
+      TRUE ~ NA_real_
+    ),
+    InitExamDate = case_when(
+      IDTYPE == 0 ~ DATE20,
+      IDTYPE == 1 ~ DATE6,
+      TRUE ~ NA_real_
+    ),
+    BaseExamDate = case_when(
+      IDTYPE == 0 ~ DATE24,
+      IDTYPE == 1 ~ DATE8,
+      TRUE ~ NA_real_
+    )
+  ) %>%
+  select(RANID, IDTYPE, SEX, matches('(Init|Base)'), matches('[A-Z](6|8|20|24)$'))
+
+# DEMENTIA ----------------------------------------------------------------
+
+common_data[['Dementia']] <-
+  common_data[['vr_demsurv_2018_a_1281s_19.sas7bdat']] %>%
+  filter(IDTYPE %in% 0:1)
+
+# BMD files
+orig_data[['BMD']] <- orig_data[['bmd0_2009s_19.sas7bdat']] %>%
+  as.matrix() %>%
+  as.data.frame(stringsAsFactors = F) %>%
+  rename_with(., toupper) %>%
+  filter(IDTYPE == 0) %>%
+  dplyr::rename(BMDInit = F20NBMD,
+                BMDBase = F24NBMD) %>%
+  dplyr::select(RANID, IDTYPE, BMDInit, BMDBase) %>%
+  mutate(RANID = as.numeric(RANID),
+         IDTYPE = as.numeric(IDTYPE)) %>%
+  # Remove is missing BMD measurements at one or both exams.
+  filter(!is.na(BMDInit) & !is.na(BMDBase))
+
+off_data[['BMD6']] <- off_data[['t_bmd_ex07_1_0104s_v1_19.sas7bdat']] %>%
+  as.matrix() %>%
+  as.data.frame(stringsAsFactors = F) %>%
+  rename_with(., toupper) %>%
+  filter(IDTYPE == 1) %>%
+  dplyr::rename(BMDInit = F6_7NBMD,
+                InitBMDDate = F6_7SCDT) %>%
+  mutate(RANID = as.numeric(RANID),
+         IDTYPE = as.numeric(IDTYPE)) %>%
+  dplyr::select(RANID, IDTYPE, InitBMDDate, BMDInit)
+
+off_data[['BMD8']] <- off_data[['t_bmdhs_2008_1_0748s_19.sas7bdat']] %>%
+  as.matrix() %>%
+  as.data.frame(stringsAsFactors = F) %>%
+  rename_with(., toupper) %>%
+  filter(IDTYPE == 1) %>%
+  dplyr::rename(BMDBase = F8CBNBMD,
+                BaseBMDDate = F8CBSCDT) %>%
+  mutate(RANID = as.numeric(RANID),
+         IDTYPE = as.numeric(IDTYPE)) %>%
+  dplyr::select(RANID, IDTYPE, BaseBMDDate, BMDBase)
+
+off_data[['BMD']] <- off_data[['BMD6']] %>%
+  left_join(off_data[['BMD8']], by = common_cols) %>%
+  filter(!is.na(BMDInit) & !is.na(BMDBase))
+
+common_data[['BMD']] <- bind_rows(orig_data[['BMD']], off_data[['BMD']]) %>%
+  mutate(RANID = as.numeric(RANID),
+         IDTYPE = as.numeric(IDTYPE),
+         BMDInit = as.numeric(BMDInit),
+         BMDBase = as.numeric(BMDBase))
+
+# Clinical
+orig_data[['Clinical']] <- orig_data[['ex0_24s_v2_19.sas7bdat']] %>%
+  as.matrix() %>%
+  as.data.frame(stringsAsFactors = F) %>%
+  rename_with(., toupper) %>%
+  dplyr::mutate(
+    Estrogen = FQ186,
+    HelpTransferring = FQ057) %>%
+    # FQ057 = as.numeric(trimws(FQ057)),
+    # HelpTransferring = case_when(
+    #   FQ057 %in% 1:4 ~ 'Yes Help',
+    #   FQ057 %in% 0 ~ 'No Help',
+    #   TRUE ~ NA_character_)) %>%
+  dplyr::select(RANID, IDTYPE, Estrogen, HelpTransferring) %>%
+  dplyr::mutate(RANID = as.numeric(RANID),
+                IDTYPE = as.numeric(IDTYPE))
+
+off_data[['Clinical1']] <- off_data[['ex1_8s_19.sas7bdat']] %>%
+  as.matrix() %>%
+  as.data.frame(stringsAsFactors = F) %>%
+  rename_with(., toupper) %>%
+  mutate(HelpTransferring = H477) %>%
+  # mutate(HelpTransferring = case_when(
+  #   H477 %in% 1:4 ~ 'Yes Help',
+  #   H477 %in% 0 ~ 'No Help',
+  #   TRUE ~ NA_character_)) %>%
+  dplyr::select(RANID, IDTYPE, HelpTransferring) %>%
+  dplyr::mutate(RANID = as.numeric(RANID),
+                IDTYPE = as.numeric(IDTYPE))
+
+off_data[['Clinical2']] <- off_data[['meno1_8s_19.sas7bdat']] %>%
+  as.matrix() %>%
+  as.data.frame(stringsAsFactors = F) %>%
+  rename_with(., toupper) %>%
+  mutate(Estrogen = EST8) %>%
+  dplyr::select(RANID, IDTYPE, Estrogen) %>%
+  dplyr::mutate(RANID = as.numeric(RANID),
+                IDTYPE = as.numeric(IDTYPE),
+                Estrogen = as.character(Estrogen))
+
+off_data[['Clinical']] <- off_data[['Clinical1']] %>%
+  full_join(off_data[['Clinical2']], by = common_cols)
+
+common_data[['Clinical']] <-
+  bind_rows(orig_data[['Clinical']], off_data[['Clinical']]) %>%
+  mutate(RANID = as.numeric(RANID),
+         IDTYPE = as.numeric(IDTYPE),
+         HelpTransferring = as.numeric(trimws(HelpTransferring)),
+         Mobility = case_when(
+           HelpTransferring == 0 ~ 'No Help',
+           HelpTransferring %in% 1:4 ~ 'Yes Help',
+           TRUE ~ NA_character_
+         ))
+
+# Workthru
+orig_data[['Workthru']] <- orig_data[['vr_wkthru_ex32_0_0997s_19.sas7bdat']] %>%
+  # as.matrix() %>%
+  # as.data.frame(stringsAsFactors = F) %>%
+  rename_with(., toupper) %>%dplyr::rename(
+    BMIInit = BMI20,
+    BMIBase = BMI24,
+    CurrentSmoker = CURRSMK24) %>%
+  # mutate(
+  #   CurrentSmoker = case_when(CURRSMK24 == 0 ~ 'No',
+  #                             CURRSMK24 == 1 ~ 'Yes',
+  #                             TRUE ~ NA_character_)
+  # ) %>%
+  dplyr::select(RANID, IDTYPE, matches('(Init|Base)'), CurrentSmoker)
+
+off_data[['Workthru']] <- off_data[['vr_wkthru_ex09_1_1001s_19.sas7bdat']] %>%
+  # as.matrix() %>%
+  # as.data.frame(stringsAsFactors = F) %>%
+  rename_with(., toupper) %>%
+  dplyr::rename(
+    # AgeInit = AGE6,
+    # AgeBase = AGE8,
+    BMIInit = BMI6,
+    BMIBase = BMI8,
+    CurrentSmoker = CURRSMK8
+  ) %>%
+  # mutate(CurrentSmoker = case_when(CURRSMK8 == 0 ~ 'No',
+  #                                  CURRSMK8 == 1 ~ 'Yes',
+  #                                  TRUE ~ NA_character_)) %>%
+  dplyr::select(RANID, IDTYPE, matches('(Init|Base)'), CurrentSmoker)
+
+common_data[['Workthru']] <- bind_rows(orig_data[['Workthru']], off_data[['Workthru']]) %>%
+  mutate(RANID = as.numeric(RANID),
+         IDTYPE = as.numeric(IDTYPE))
+
+# MERGE -------------------------------------------------------------------
+
+one_year_cutoff <- 365.25
+three_year_cutoff <- one_year_cutoff*3
+five_year_cutoff <- one_year_cutoff*5
+ten_year_cutoff <- one_year_cutoff*10
+bmd_cutoffs <- c(0,.25, .5, .75, 1)
+
+df <- common_data[['BMD']] %>%
+  inner_join(common_data[['Dates']], by = common_cols) %>%
+  inner_join(common_data[['Dementia']], by = common_cols) %>%
+  full_join(common_data[['APOE']], by = common_cols) %>%
+  full_join(common_data[['Workthru']], by = common_cols) %>%
+  full_join(common_data[['Clinical']], by = common_cols) %>%
+  filter((IDTYPE == 0 &
+            ATT24 == 1 &
+            DATE24 < DEM_SURVDATE) |
+           (IDTYPE == 1 & ATT8 == 1 & DATE8 < DEM_SURVDATE)
+  ) %>%
+  filter(!is.na(BMDInit) & !is.na(BMDBase)) %>%
+  filter(AgeBase >= 60) %>% # Cutoff based on Alexa's recommendation.
+  filter(!is.na(InitExamDate)) %>%
+  mutate(
+    Cohort = case_when(IDTYPE == 0 ~ 'Original',
+                       IDTYPE == 1 ~ 'Offspring',
+                       TRUE ~ NA_character_),
+    AgeInitQuartiles = cut(AgeInit, include.lowest = T,
+                           breaks = quantile(AgeInit, probs = bmd_cutoffs)),
+    AgeBaseQuartiles = cut(AgeBase, include.lowest = T,
+                           breaks = quantile(AgeBase, probs = bmd_cutoffs)),
+    AgeBaseTertiles = case_when(
+      AgeBaseQuartiles %in% c("[60,66]", "(66,74]") ~ '[60,74]',
+      AgeBaseQuartiles == '(74,79]' ~ '(74,79]',
+      AgeBaseQuartiles == '(79,95]' ~ '(79,95]'
+    ),
+    # Set youngest as reference category.
+    AgeBaseTertiles = relevel(factor(AgeBaseTertiles), ref = '[60,74]'),
+    # 79 y/o is the third quartile.
+    AgeCat = ifelse(AgeBase < 79, 'Under79', 'AtLeast79'),
+    Sex = case_when(SEX == 1 ~ 'Male',
+                    SEX == 2 ~ 'Female',
+                    TRUE ~ NA_character_),
+    # Estrogen = as.factor(Estrogen),
+    EstrogenUse = ifelse(Sex == 'Male', 'Male',
+                         ifelse(Sex == 'Female' & Estrogen == '1','Female Estrogen Use', 
+                                ifelse(Sex == 'Female' & Estrogen %in% c('0','2'), 'Female No Estrogen Use', NA))),
+    # Find survival time.
+    SurvTime = DEM_SURVDATE - BaseExamDate,
+    SurvTime3 = ifelse(SurvTime > three_year_cutoff, three_year_cutoff, SurvTime),
+    SurvTime5 = ifelse(SurvTime > five_year_cutoff, five_year_cutoff, SurvTime),
+    SurvTime10 = ifelse(SurvTime > ten_year_cutoff, ten_year_cutoff, SurvTime),
+    # Find dementia/AD status at years 3, 5, and 10.
+    DemStatus3 = ifelse(SurvTime > three_year_cutoff, 0, DEM_STATUS),
+    DemStatus5 = ifelse(SurvTime > five_year_cutoff, 0, DEM_STATUS),
+    DemStatus10 = ifelse(SurvTime > ten_year_cutoff, 0, DEM_STATUS),
+    ADStatus3 = ifelse(SurvTime > three_year_cutoff, 0, AD_STATUS),
+    ADStatus5 = ifelse(SurvTime > five_year_cutoff, 0, AD_STATUS),
+    ADStatus10 = ifelse(SurvTime > ten_year_cutoff, 0, AD_STATUS),
+    # Compute bone loss (see Documentation.Rmd for equation).
+    BoneLoss = (100 * ((BMDInit - BMDBase) / BMDInit)) / ((BaseExamDate - InitExamDate) /
+                                                            one_year_cutoff),
+    # Create quartiles: Q4 = Highest bone loss quartile OR Q4 = Lowest baseline BMD quartile.
+    BoneLossLowestQuartileLabels = cut(
+      BoneLoss,
+      include.lowest = T,
+      breaks = quantile(BoneLoss, probs = bmd_cutoffs)
+    ),
+    BoneLossLowestQuartile = ifelse(as.numeric(BoneLossLowestQuartileLabels) == 1, 1, 0),
+    BMDBaseHighestQuartileLabels = cut(
+      BMDBase,
+      include.lowest = T,
+      breaks = quantile(BMDBase, probs = bmd_cutoffs)
+    ),
+    BMDBaseHighestQuartile = ifelse((
+      5 - as.numeric(BMDBaseHighestQuartileLabels)
+    ) == 1, 1, 0),
+    # Assign reference quartiles. NOTE: Does not seem to work. See below.
+    # BMDBaseHighestQuartileLabels = relevel(BMDBaseHighestQuartileLabels, ref = '(0.959,1.6]'),
+    # BoneLossLowestQuartileLabels = relevel(BoneLossLowestQuartileLabels, ref = '[-5.7,-0.259]'),
+    DeltaBMD = BMDInit - BMDBase,
+    DeltaBMDStd = (DeltaBMD - mean(DeltaBMD)) / sd(DeltaBMD)
+  ) %>%
+  dplyr::select(-IDTYPE, -SEX)
+
+# Assign Q1 to highest BMD quartile.
+levels(df$BMDBaseHighestQuartileLabels) <- paste(paste0('Q', 4:1), levels(df$BMDBaseHighestQuartileLabels))
+# Assign Q1 to lowest bone loss quartile.
+levels(df$BoneLossLowestQuartileLabels) <- paste(paste0('Q', 1:4), levels(df$BoneLossLowestQuartileLabels))
+# Assign Q1 as reference quartile.
+df$BMDBaseHighestQuartileLabels <- relevel(df$BMDBaseHighestQuartileLabels, ref = 'Q1 (0.959,1.6]')
+df$BoneLossLowestQuartileLabels <- relevel(df$BoneLossLowestQuartileLabels, ref = 'Q1 [-5.7,-0.259]')
+# Assign Q4 as reference quartile.
+df$BMDBaseHighestQuartile <- ifelse(df$BMDBaseHighestQuartileLabels == 'Q4 [0.345,0.753]', 1, 0)
+df$BoneLossLowestQuartile <- ifelse(df$BoneLossLowestQuartileLabels == 'Q4 (0.663,4.86]', 1, 0)
+# saveRDS(df, paste(data_dir, 'BoneLoss.rds', sep = '/'))
+
+# KINSHIP CODING ----------------------------------------------------------
+
+# Kinship coding
+kinship_df <-
+  read_file_by_ext(f = list.files(pattern = 'ped', path = data_dir),
+                   path = data_dir) %>%
+  dplyr::rename_with(toupper) %>%
+  mutate(Sex = ifelse(SEX == 1, 'Male', 'Female')) %>%
+  dplyr::select(-SEX)
+maxped = max(kinship_df$PEDNO) # 1542
+missing_id.loss <- as.numeric(setdiff(df$RANID, kinship_df$RANID))
+nmiss = length(missing_id.loss)
+missing_sex.loss <- df$Sex[df$RANID %in% missing_id.loss]
+missing_ped.loss <- data.frame(PEDNO = (maxped+1):(maxped+nmiss),
+                               RANID = missing_id.loss,
+                               FATHER = NA,
+                               MOTHER = NA,
+                               Sex = missing_sex.loss,
+                               ITWIN = NA)
+ped_all.l <- rbind(kinship_df, missing_ped.loss)
+ped.l <- with(ped_all.l, pedigree(id = RANID, FATHER, MOTHER, sex = Sex, famid = PEDNO))
+kmat.l <- kinship(ped.l)
+kmat1.l <- as.matrix(kmat.l)
+ids <- colnames(kmat1.l) %in% df$RANID
+kmat.test <- kmat.l[ids, ids]
+data = merge(df, ped_all.l, by = 'RANID', suffixes = c('', '.ped')) %>%
+  dplyr::select(-Sex.ped)
+# saveRDS(kmat.test, paste(data_dir, 'Kinship_for_BoneLoss.rds', sep = '/'))

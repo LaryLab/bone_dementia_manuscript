@@ -1,0 +1,385 @@
+---
+title: "Bone Loss Analysis"
+date: "last updated `r format(Sys.time(), '%d %B, %Y')`"
+knit: (function(inputFile, encoding) { 
+      out_dir <- 'output';
+      rmarkdown::render(inputFile,
+                        encoding=encoding, 
+                        output_file=file.path(dirname(dirname(inputFile)), 
+                        out_dir, 'BoneLossAnalysis.html')) 
+                        })
+output: 
+  html_document:
+    toc: TRUE
+    toc_float: TRUE
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = FALSE, 
+                      cache = FALSE,
+                      fig.height = 20,
+                      fig.width = 20,
+                      units = 'in',
+                      fig.show = 'hold'
+                      )
+
+librarian::shelf(dplyr,
+                 finalfit,
+                 flextable,
+                 gtsummary,
+                 kable,
+                 kableExtra,
+                 plyr,
+                 rrtable)
+
+# home_dir <- dirname(dirname(rstudioapi::getActiveDocumentContext()$path))
+home_dir <- '/home/ckhoo@mehealth.org/cobre-dementia'
+data_dir <- paste(home_dir, 'data', sep = '/')
+fig_dir <- paste(home_dir, 'figures', sep = '/')
+res_dir <- paste(home_dir, 'results', sep = '/')
+script_dir <- paste(home_dir, 'scripts', sep = '/')
+sys.source(paste(script_dir, 'utils.R', sep = '/'))
+```
+
+```{r data}
+
+data <- readRDS(paste(data_dir, 'BoneLoss.rds', sep = '/'))
+
+```
+
+# Table 1 
+```{r tbl1, warning = F, eval = T}
+
+tmp <- data %>%
+  dplyr::select(
+    Sex,
+    AgeBase,
+    EstrogenUse,
+    Cohort,
+    BoneLoss,
+    BoneLossLowestQuartileLabels,
+    BMDBase,
+    CurrentSmoker,
+    BMIBase,
+    APOEStatus,
+    Mobility,
+    matches('(Dem|AD)Status10')
+  ) %>%
+  gtsummary::tbl_summary(
+    by = 'Sex',
+    missing_text = 'Missing',
+    label = list(
+      AgeBase ~ 'Age at Baseline Visit (years)',
+      EstrogenUse ~ 'Estrogen',
+      BoneLoss ~ 'Bone Loss',
+      BoneLossLowestQuartileLabels ~ 'Bone Loss Quartiles',
+      BMDBase ~ 'Baseline BMD (g/cm\u00B2)',
+      CurrentSmoker ~ 'Current Smoker',
+      BMIBase ~ 'BMI at Baseline Visit',
+      APOEStatus ~ '\u22651 APOE \u03B54 allele',
+      # DemStatus3 ~ 'Dementia Status at Year 3',
+      # DemStatus5 ~ 'Dementia Status at Year 5',
+      DemStatus10 ~ 'Dementia Status at Year 10',
+      # ADStatus3 ~ 'AD Status at Year 3',
+      # ADStatus5 ~ 'AD Status at Year 5',
+      ADStatus10 ~ 'AD Status at Year 10'
+    )
+  )
+tmp
+
+# tmp %>%
+#   as_flex_table() %>%
+#   flextable::font(fontname = 'Arial', part = 'all') %>%
+#   flextable::save_as_docx(path = paste0(home_dir, '/worddocs/Table1_', gsub('-', '_', Sys.Date()), '.docx'))
+
+```
+
+# Table 2
+
+Includes 
+
+* results from Rotterdam cohort;
+* results from meta-analysis of Framingham and Rotterdam.
+
+```{r tbl2, eval = T, out.width = "100%"}
+tbl2_framingham <- readRDS(paste(res_dir, 'BoneLoss_Table2.rds', sep = '/'))
+tbl2_rotterdam <- readRDS(paste(res_dir, 'Rotterdam_BoneLoss_Table2.rds', sep = '/')) %>%
+  dplyr::select(Exposure, Model, Parametrization, `Rotterdam: Hazard Ratio (95% CI, p-value)`)
+
+tmp <- tbl2_framingham %>%
+  dplyr::filter(grepl('10-year', Model) & grepl('(BMD|Bone Loss)', Variable)) %>%
+  # Remove the 10-year FU label to match manuscript.
+  dplyr::mutate(Model = gsub(' - 10-year FU', '', Model),
+                Parametrization = case_when(
+                  Variable == 'Baseline BMD' & grepl('1.1', Model) ~ 'continuous (g/cm\u00B2)',
+                  Variable %in% c('Baseline BMD Q4 [0.345,0.753]', 'Bone Loss Q4 (0.779,4.86]') ~ 'Q4 vs. Q1',
+                  Variable %in% c('Baseline BMD Q3 (0.753,0.848]', 'Bone Loss Q3 (0.218,0.779]') ~ 'Q3 vs. Q1',
+                  Variable %in% c('Baseline BMD Q2 (0.848,0.956]', 'Bone Loss Q2 (-0.299,0.218]') ~ 'Q2 vs. Q1',
+                  Variable %in% c('Baseline BMDQ4', 'Bone LossQ4') ~ 'Q4 vs. Q1-3',
+                  Variable == 'Bone Loss' & grepl('2.1', Model) ~ 'continuous (% decline/year)',
+                  Variable == 'Baseline BMD' & grepl('3', Model) ~ 'Baseline BMD (g/cm\u00B2)',
+                  TRUE ~ Variable
+                )) %>%
+  dplyr::select(-Table, -Variable) %>%
+  dplyr::rename(`Framingham: Hazard Ratio (95% CI, p-value)` = `Hazard Ratio`) %>%
+  merge(., tbl2_rotterdam, by = c('Model', 'Parametrization')) %>%
+  relocate(Exposure, Model, Parametrization)
+
+caption_text <- 'Associations between BMD (bone mineral density) exposures and incident dementia in sex-combined models, adjusting for age, sex, ApoE4 status, and BMI. Quartiles are designated as Q1, Q2, Q3, and Q4'
+
+tmp %>%
+  rrtable::df2flextable2(., vanilla = T,
+                         font = 'Arial',
+                         fontsize = 11,
+                         colorheader = F,
+                         odd_header = 'transparent',
+                         even_body = 'transparent',
+                         align_body = 'center',
+                         vlines = F) %>%
+  merge_v(j = c('Exposure', 'Model')) %>%
+  hline(i = c(5, 10))
+
+# tmp %>%
+#   dplyr::select(-Table) %>%
+#   rrtable::df2flextable2(., vanilla = T,
+#                          font = 'Arial',
+#                          fontsize = 11,
+#                          colorheader = F,
+#                          odd_header = 'transparent',
+#                          even_body = 'transparent',
+#                          vlines = F) %>%
+#   flextable::font(fontname = 'Arial', part = 'all') %>%
+#   flextable::save_as_docx(path = paste0(home_dir, '/worddocs/Table2_', gsub('-', '_', Sys.Date()), '.docx'))
+
+
+```
+
+# Table 3
+```{r tbl3, eval = T}
+
+tmp <- readRDS(paste(res_dir, 'BoneLoss_Table3.rds', sep = '/')) 
+
+tmp %>%
+  dplyr::filter(grepl('10-year', Model) & grepl('(BMD|Bone Loss)', Variable)) %>%
+  dplyr::mutate(Model = gsub(' - 10-year FU', '', Model),
+                Parametrization = case_when(
+                  Variable == 'Baseline BMD' & grepl('1.1', Model) ~ 'continuous (g/cm\u00B2)',
+                  Variable %in% c('Baseline BMD Q4 [0.345,0.753]', 'Bone Loss Q4 (0.779,4.86]') ~ 'Q4 vs. Q1',
+                  Variable %in% c('Baseline BMD Q3 (0.753,0.848]', 'Bone Loss Q3 (0.218,0.779]') ~ 'Q3 vs. Q1',
+                  Variable %in% c('Baseline BMD Q2 (0.848,0.956]', 'Bone Loss Q2 (-0.299,0.218]') ~ 'Q2 vs. Q1',
+                  Variable %in% c('Baseline BMDQ4', 'Bone LossQ4') ~ 'Q4 vs. Q1-3',
+                  Variable == 'Bone Loss' & grepl('2.1', Model) ~ 'continuous (% decline/year)',
+                  Variable == 'Baseline BMD' & grepl('3', Model) ~ 'Baseline BMD (g/cm\u00B2)',
+                  TRUE ~ Variable
+                ),
+                Exposure = c(rep('Baseline BMD', 10), 
+                             rep('Bone Loss', 10), 
+                             rep('Baseline BMD and Bone Loss', 4))) %>%
+  tidyr::separate(Model, into = c('Model', 'Sex'), sep = ' ') %>%
+  dplyr::select(-Table, -Variable) %>%
+  relocate(Exposure, Sex, Model, Parametrization) %>%
+  rrtable::df2flextable2(., vanilla = T,
+                         font = 'Arial',
+                         fontsize = 11,
+                         colorheader = F,
+                         odd_header = 'transparent',
+                         even_body = 'transparent',
+                         align_body = 'center',
+                         vlines = F) %>%
+  merge_v(j = c('Exposure', 'Sex', 'Model')) %>%
+  hline(i = c(10, 20))
+
+# tmp %>%
+#   dplyr::select(-Table) %>%
+#   rrtable::df2flextable2(., vanilla = T,
+#                          font = 'Arial',
+#                          fontsize = 11,
+#                          colorheader = F,
+#                          odd_header = 'transparent',
+#                          even_body = 'transparent',
+#                          vlines = F,
+#                          mincol = 4) %>%
+#   flextable::font(fontname = 'Arial', part = 'all') %>%
+#   flextable::save_as_docx(path = paste0(home_dir, '/worddocs/Table3_', gsub('-', '_', Sys.Date()), '.docx'))
+
+```
+
+# Table 4
+```{r tbl4, eval = T}
+
+tmp <- readRDS(paste(res_dir, 'BoneLoss_Table4.rds', sep = '/')) 
+
+tmp %>%
+  dplyr::filter(grepl('Bone Loss', Variable)) %>%
+  dplyr::rename(Parametrization = Variable) %>%
+  dplyr::mutate(Parametrization = gsub(':', ' x ', Parametrization),
+                Parametrization = gsub('BMDQ4', 'BMD Q4 vs. Q1-3', Parametrization)) %>%
+  dplyr::select(-Table) %>% 
+  rrtable::df2flextable2(., vanilla = T,
+                         font = 'Arial',
+                         fontsize = 11,
+                         colorheader = F,
+                         odd_header = 'transparent',
+                         even_body = 'transparent',
+                         align_body = 'center',
+                         vlines = F)
+
+# tmp %>%
+#   dplyr::select(-Table) %>%
+#   rrtable::df2flextable2(., vanilla = T,
+#                          font = 'Arial',
+#                          fontsize = 11,
+#                          colorheader = F,
+#                          odd_header = 'transparent',
+#                          even_body = 'transparent',
+#                          vlines = F,
+#                          mincol = 4) %>%
+#   flextable::font(fontname = 'Arial', part = 'all') %>%
+#   flextable::save_as_docx(path = paste0(home_dir, '/worddocs/Table4_', gsub('-', '_', Sys.Date()), '.docx'))
+
+```
+
+# Table S1
+
+See `~/results/Rotterdam Table 1.docx`.
+
+# Table S2
+```{r tblS2, eval = F}
+
+tmp <- readRDS(paste(res_dir, 'Rotterdam_BoneLoss_Table3.rds', sep = '/'))
+
+tmp %>%
+  dplyr::select(Exposure, Sex, Model, Parametrization, ncol(tmp)) %>%
+  rrtable::df2flextable2(., vanilla = T,
+                         font = 'Arial',
+                         fontsize = 11,
+                         colorheader = F,
+                         odd_header = 'transparent',
+                         even_body = 'transparent',
+                         align_body = 'center',
+                         vlines = F) %>%
+  merge_v(j = c('Exposure', 'Sex', 'Model'))
+
+```
+
+# Table S3
+```{r tblS3, eval = F}
+
+tmp <- readRDS(paste(res_dir, 'BoneLoss_TableS3.rds', sep = '/'))
+
+tmp %>%
+  dplyr::filter(grepl('10-year', Model) & grepl('(BMD|Bone Loss)', Variable)) %>%
+  # Remove the 10-year FU label to match manuscript.
+  dplyr::mutate(Model = gsub(' - 10-year FU', '', Model),
+                Parametrization = case_when(
+                  Variable == 'Baseline BMD' & grepl('1.1', Model) ~ 'continuous (g/cm\u00B2)',
+                  Variable %in% c('Baseline BMD Q4 [0.345,0.753]', 'Bone Loss Q4 (0.663,4.86]') ~ 'Q4 vs. Q1',
+                  Variable %in% c('Baseline BMD Q3 (0.753,0.849]', 'Bone Loss Q3 (0.196,0.663]') ~ 'Q3 vs. Q1',
+                  Variable %in% c('Baseline BMD Q2 (0.849,0.959]', 'Bone Loss Q2 (-0.259,0.196]') ~ 'Q2 vs. Q1',
+                  Variable %in% c('Baseline BMDHighestQuartile', 'Bone LossLowestQuartile') ~ 'Q1 vs. Q2-4',
+                  Variable == 'Bone Loss' & grepl('2.1', Model) ~ 'continuous (% decline/year)',
+                  Variable == 'Baseline BMD' & grepl('3', Model) ~ 'Baseline BMD (g/cm\u00B2)',
+                  TRUE ~ Variable
+                ),
+                Exposure = c(rep('Baseline BMD', 5), 
+                             rep('Bone Loss', 5), 
+                             rep('Baseline BMD and Bone Loss', 2))) %>%
+  dplyr::select(-Table, -Variable) %>%
+  relocate(Exposure, Model, Parametrization) %>%
+  rrtable::df2flextable2(., vanilla = T,
+                         font = 'Arial',
+                         fontsize = 11,
+                         colorheader = F,
+                         odd_header = 'transparent',
+                         even_body = 'transparent',
+                         align_body = 'center',
+                         vlines = F) %>%
+  merge_v(j = c('Exposure', 'Model'))
+
+# tmp %>%
+#   dplyr::select(-Table) %>%
+#   rrtable::df2flextable2(., vanilla = T,
+#                          font = 'Arial',
+#                          fontsize = 11,
+#                          coloheader = F,
+#                          odd_header = 'transparent',
+#                          even_body = 'transparent',
+#                          vlines = F,
+#                          mincol = 4) %>%
+#   flextable::font(fontname = 'Arial', part = 'all') %>%
+#   flextable::save_as_docx(path = paste0(home_dir, '/worddocs/TableS3_', gsub('-', '_', Sys.Date()), '.docx'))
+
+```
+
+# Table S4
+```{r tblS4, eval = F}
+
+tmp <- readRDS(paste(res_dir, 'BoneLoss_TableS4.rds', sep = '/'))
+
+tmp %>%
+  dplyr::filter(grepl('10-year', Model) & grepl('(BMD|Bone Loss)', Variable)) %>%
+  # Remove the 10-year FU label to match manuscript.
+  dplyr::mutate(Model = case_when(
+    grepl('1.1', Model) ~ '7',
+    grepl('1.2', Model) ~ '8'
+  )) %>%
+  dplyr::rename(Parametrization = Variable) %>%
+  dplyr::select(-Table) %>%
+  rrtable::df2flextable2(., vanilla = T,
+                         font = 'Arial',
+                         fontsize = 11,
+                         colorheader = F,
+                         odd_header = 'transparent',
+                         even_body = 'transparent',
+                         align_body = 'center',
+                         vlines = F)
+
+# tmp %>%
+#   dplyr::select(-Table) %>%
+#   rrtable::df2flextable2(., vanilla = T,
+#                          font = 'Arial',
+#                          fontsize = 11,
+#                          coloheader = F,
+#                          odd_header = 'transparent',
+#                          even_body = 'transparent',
+#                          vlines = F,
+#                          mincol = 5) %>%
+#   flextable::font(fontname = 'Arial', part = 'all') %>%
+#   flextable::save_as_docx(path = paste0(home_dir, '/worddocs/TableS4_', gsub('-', '_', Sys.Date()), '.docx'))
+
+```
+
+# Table S5
+```{r tblS5, eval = F}
+
+tmp <- readRDS(paste0(res_dir, '/BoneLoss_TableS5.rds'))
+
+tmp %>%
+  dplyr::rename(Parametrization = Variable) %>%
+  dplyr::mutate(Model = gsub(' - 10-year FU', '', Model),
+                Parametrization = gsub('CurrentSmoker', 'Current Smoker', Parametrization)) %>%
+  rrtable::df2flextable2(., vanilla = T,
+                         font = 'Arial',
+                         fontsize = 11,
+                         colorheader = F,
+                         odd_header = 'transparent',
+                         even_body = 'transparent',
+                         align_body = 'center',
+                         vlines = F) %>%
+  merge_v(j = c('Exposure', 'Model'))
+
+# tmp %>%
+#   dplyr::select(-Table) %>%
+#   rrtable::df2flextable2(., vanilla = T,
+#                          font = 'Arial',
+#                          fontsize = 11,
+#                          coloheader = F,
+#                          odd_header = 'transparent',
+#                          even_body = 'transparent',
+#                          vlines = F,
+#                          mincol = 5) %>%
+#   flextable::font(fontname = 'Arial', part = 'all') %>%
+#   flextable::save_as_docx(path = paste0(home_dir, '/worddocs/TableS5_', gsub('-', '_', Sys.Date()), '.docx'))
+
+```

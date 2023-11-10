@@ -1,0 +1,34 @@
+---
+title: "BlankTemplate"
+date: "last updated `r format(Sys.time(), '%d %B, %Y')`"
+knit: (function(inputFile, encoding) { 
+      out_dir <- 'output';
+      rmarkdown::render(inputFile,
+                        encoding=encoding, 
+                        output_file=file.path(dirname(dirname(inputFile)), 
+                        out_dir, 'BlankTemplate.html')) 
+                        })
+output: 
+  html_document:
+    css: ~/BMD/style.css
+    toc: TRUE
+    toc_float: TRUE
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = FALSE, 
+                      cache = FALSE,
+                      fig.height = 20,
+                      fig.width = 20,
+                      units = 'in',
+                      fig.show = 'hold'
+                      )
+invisible(sapply(list.files(
+  pattern = '(directories|modules|utils)',
+  recursive = TRUE,
+  full.names = TRUE),
+function(f)
+  sys.source(f, env = attach(NULL))))
+
+```

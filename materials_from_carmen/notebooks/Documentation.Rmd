@@ -1,0 +1,485 @@
+---
+title: "Documentation"
+author: "Carmen Khoo"
+date: "last updated `r format(Sys.time(), '%B %d, %Y')`"
+output: 
+  html_document:
+    code_folding: hide
+    css: ./style.css
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+librarian::shelf(coxme,
+                 dplyr,
+                 DT,
+                 GEOquery,
+                 gtsummary,
+                 kable,
+                 kableExtra,
+                 kinship2,
+                 tidyr,
+                 vcfR)
+home_dir <- '/home/ckhoo@mmcf.mehealth.org/BMD'
+data_dir <- paste(home_dir, 'data', sep = '/')
+sys.source(paste(home_dir, 'utils.R', sep = '/'), envir = attach(NULL))
+```
+
+# Data
+
+Source: `\\vmmmcri\TIER2B\CORE\SEER_MEDICARE_TIER2B\Framingham\ADRD\P5187_DISTRIBUTION\DATA_TOGO`
+
+Note that the relevant files needed can be found in the `data` subdirectory.
+
+* Original Cohort (Exams 20 and 24):
+  - BMD: bmd0_2009s_19.sas7bdat
+  - Clinical: ex0_20s_v1_19.sas7bdat, ex0_24s_v2_19.sas7bdat
+  - Dementia: vr_demsurv_2018_a_1281s_19.sas7bdat
+
+* Offspring Cohort (Exams 6 and 8):
+  - BMD: 
+  - Clinical: 
+  - Workthru: 
+  
+### Nomenclature for Manuscript
+
+```{r schematic, fig.align='center'}
+knitr::include_graphics('./figures/BMDSchematic.png')
+```
+
+Based on the schematic above, measurements associated with the first exam date (Exam 20 for Original; Exam 6 for Offspring) are usually labeled <b>init</b> (or <b>initial</b>) and those associated with the second exam date (Exam 24 for Original; Exam 8 for Offspring) are usually labeled <b>base</b> (or <b>baseline</b>).
+
+The consort diagram below shows that subjects with missing BMD measurements at either initial or baseline exams were excluded, along with subjects without dementia follow-up at baseline. 
+
+```{r consort, fig.align='center'}
+knitr::include_graphics('./figures/BMDConsortDiagram.png')
+```
+* The file containing exam dates is used to filter subjects who attended both initial and baseline exams (`ATT` variable).
+  - 635 subjects in the Original cohort attended both Exam 20 and Exam 24. Note, however, subjects who attended both exams did not necessarily have BMD measurements taken.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+### Variables for Manuscript
+
+Data dictionaries are found in `\\vmmmcri\TIER2B\CORE\SEER_MEDICARE_TIER2B\Framingham\ADRD\sent 2021 06 08 to CL FHS 5187 - docs part 1` or `\\vmmmcri\TIER2B\CORE\SEER_MEDICARE_TIER2B\Framingham\ADRD\sent 2021 06 08 to CL FHS 5187 - docs part 2`.
+
+```{r documentationTable}
+docTbl <- data.frame(
+  Table = character(),
+  File = character(),
+  Criterion = character(),
+  InitialN = character(),
+  OutputN = character(),
+  Notes = character()
+)
+```
+  
+<!-- <b>RENAMED VARIABLES</b> -->
+
+<!-- * Mobility -->
+<!--   - See page 16 of `ex0_24s_v2.doc`. -->
+<!--   - Named either `transferring`, `help_transferring`, `HELPTRANSFERRING` in older scripts. -->
+<!--   - Listed as `FQ057` in original SAS file. -->
+<!--   - In the analysis, the levels are: 0 = No help needed, independent; 1 = All other levels. -->
+    
+
+<!-- * `f20nbmd` $\longrightarrow$ `BMDINIT` -->
+<!-- * `f24nbmd` $\longrightarrow$ `BMDBASE` -->
+<!-- * `f6_7scdt` $\longrightarrow$ `BMDDateInit` -->
+<!-- * `f8cbscdt` $\longrightarrow$ `BMDDateBase` -->
+<!-- * $\longrightarrow$ `Estrogen` -->
+<!-- * `HELPTRANSFERRING` $\longrightarrow$ `Mobility` (previously `TRANSFERRING`) -->
+<!-- * `APOEStatus` $\longrightarrow$  (previously `APOE4STAT`) -->
+<!-- * $\longrightarrow$  -->
+
+<b>COMPUTED/REFACTORED VARIABLES</b>
+
+* `BoneLoss` (previously `BMDPERCENTPERYEAR`): $\frac{(BMD_{Initial} - BMD_{Baseline})/BMD_{Initial}}{(Date_{Baseline} - Date_{Initial}) \times 365.25} \times 100$
+<!-- * `SEX`: 1 = Male, 2 = Female. -->
+
+```{r commonFiles}
+# Files that pertain to both Original and Offspring cohort.
+common_files <- c(
+  'fhs_master_apoe_19.sas7bdat',
+  'vr_dates_2019_a_1175s_19.sas7bdat',
+  'vr_demsurv_2018_a_1281s_19.sas7bdat'
+)
+common_data <- lapply(setNames(common_files, common_files), read_file_by_ext, path = data_dir)
+
+common_data[['APOE']] <-
+  common_data[['fhs_master_apoe_19.sas7bdat']] %>%
+  as.matrix() %>%
+  as.data.frame(stringsAsFactors = F) %>%
+  rename_with(., toupper) %>%
+  # Subset only Original (IDTYPE = 0) and Offspring (IDTYPE = 1)
+  filter(IDTYPE %in% 0:1) %>%
+  # Status = 1 if at least one e4 allele
+  mutate(APOEStatus = case_when(grepl('4', APOE) ~ 1,
+                                TRUE ~ 0))
+
+docTbl <- docTbl %>%
+  add_row(
+    Table = 'APOE',
+    File = 'fhs_master_apoe_19.sas7bdat',
+    Criterion = 'Include only Original and Offspring subjects.',
+    InitialN = 'Original - 1,314; Offspring - 4,077',
+    OutputN = 'Same as initial.',
+    Notes = 'No missing data.'
+  )
+
+common_data[['Dates']] <- common_data[['vr_dates_2019_a_1175s_19.sas7bdat']] %>%
+  as.matrix() %>%
+  as.data.frame(stringsAsFactors = F) %>%
+  rename_with(., toupper) %>%
+  filter(IDTYPE %in% 0:1) %>%
+  # filter( (IDTYPE == 0 & ATT20 == 1 & ATT24 == 1) | (IDTYPE == 1 & ATT6 == 1 & ATT8 == 1)) %>%
+  # Create age columns to denote age at initial visit and age at baseline visit for both cohorts.
+  mutate(
+    AgeInit = case_when(
+      IDTYPE == 0 ~ AGE20,
+      IDTYPE == 1 ~ AGE6,
+      TRUE ~ NA_real_
+    ),
+    AgeBase = case_when(
+      IDTYPE == 0 ~ AGE24,
+      IDTYPE == 1 ~ AGE8,
+      TRUE ~ NA_real_
+    ),
+    InitExamDate = case_when(
+      IDTYPE == 0 ~ DATE20,
+      IDTYPE == 1 ~ DATE6,
+      TRUE ~ NA_real_
+    ),
+    BaseExamDate = case_when(
+      IDTYPE == 0 ~ DATE24,
+      IDTYPE == 1 ~ DATE8,
+      TRUE ~ NA_real_
+    )
+  ) %>%
+  select(RANID, IDTYPE, SEX, matches('(Init|Base)'), matches('[A-Z](6|8|20|24)$'))
+
+tmp1 <- common_data[['vr_dates_2019_a_1175s_19.sas7bdat']] %>%
+  filter(idtype %in% 0:1) %>%
+  group_by(idtype) %>%
+  dplyr::summarize(N = n())
+
+tmp2 <- common_data[['Dates']] %>%
+  group_by(IDTYPE) %>%
+  dplyr::summarize(N = n())
+
+docTbl <- docTbl %>%
+  add_row(
+    Table = 'Dates',
+    File = 'vr_dates_2019_a_1175s_19.sas7bdat',
+    Criterion = 'Include only Original and Offspring subjects who attended both initial and baseline exams.',
+    InitialN = 'Original - 5,079; Offspring - 5,002',
+    OutputN = 'Original - 635; Offspring - 2,765',
+    Notes = 'This file has complete sex data; be careful not to merge with other files that have missing sex data.
+    The output has 635 Original subjects and 2765 Offspring subjects.'
+  )
+
+common_data[['Dementia']] <- common_data[['vr_demsurv_2018_a_1281s_19.sas7bdat']] %>%
+  as.matrix() %>%
+  as.data.frame(stringsAsFactors = F) %>%
+  rename_with(., toupper) %>%
+  filter(IDTYPE %in% 0:1)
+
+docTbl <- docTbl %>%
+  add_row(
+    Table = 'Dementia',
+    File = 'vr_demsurv_2018_a_1281s_19.sas7bdat',
+    Criterion = 'Include only Original and Offspring subjects; exclude subjects with dementia before baseline',
+    InitialN = 'Original - 3,142; Offspring - 4,114',
+    OutputN = 'Original - 576; Offspring - 2,469',
+    Notes = 'No missing data.'
+  )
+
+common_cols <- c('RANID', 'IDTYPE')
+# df <- common_data[['Dates']] %>%
+#   merge(., common_data[['Dementia']], by = common_cols) %>%
+#   merge(., common_data[['APOE']], by = common_cols) %>%
+  # For dementia, we do not want dementia before baseline exams.
+  # - Original cohort: Filter to include DATE24 < DEM_SURVDATE;
+  # - Offspring cohort: Filter to include DATE8 < DEM_SURVDATE.
+  # filter(BaseExamDate < DEM_SURVDATE)
+# dim(df); colSums(is.na(df))
+```
+
+### Data Preprocessing
+
+```{r dataproc}
+
+
+# dim(df); table(df$Cohort); colSums(is.na(df))
+
+docTbl <- docTbl %>% 
+  add_row(
+    Table = 'BMD (Original, Exams 20 and 24)',
+    File = 'bmd0_2009s_19.sas7bdat',
+    Criterion = 'Include only Original subjects.',
+    InitialN = '1,243',
+    OutputN = '525',
+    Notes = 'N/A'
+  ) %>%
+  add_row(
+    Table = 'BMD (Offspring, Exam 6)',
+    File = 't_bmd_ex07_1_0104s_v1_19.sas7bdat',
+    Criterion = 'Include only Offspring subjects.',
+    InitialN = '3,025',
+    OutputN = '2,971',
+    Notes = 'N/A'
+  ) %>%
+  add_row(
+    Table = 'BMD (Offspring, Exam 8)',
+    File = 't_bmdhs_2008_1_0748s_19.sas7bdat',
+    Criterion = 'Include only Offspring subjects.',
+    InitialN = '2,252',
+    OutputN = '1,822',
+    Notes = 'N/A'
+  ) %>%
+  add_row(
+    Table = 'BMD + Dementia + APOE',
+    File = 'N/A',
+    Criterion = 'N/A',
+    InitialN = 'N/A',
+    OutputN = 'Offspring - 448; Original - 1,583',
+    Notes = ''
+  ) %>%
+  add_row(
+    Table = 'Original Clinical',
+    File = 'TBD',
+    Criterion = 'TBD',
+    InitialN = 'TBD',
+    OutputN = 'TBD',
+    Notes = ''
+  ) %>%
+  add_row(
+    Table = 'Original Wokthru',
+    File = 'TBD',
+    Criterion = 'TBD',
+    InitialN = 'TBD',
+    OutputN = 'TBD',
+    Notes = ''
+  ) %>%
+  add_row(
+    Table = 'Offspring Clinical',
+    File = 'TBD',
+    Criterion = 'TBD',
+    InitialN = 'TBD',
+    OutputN = 'TBD',
+    Notes = ''
+  ) %>%
+  add_row(
+    Table = 'Offspring Wokthru',
+    File = 'TBD',
+    Criterion = 'TBD',
+    InitialN = 'TBD',
+    OutputN = 'TBD',
+    Notes = ''
+  )
+  
+```
+
+```{r}
+
+docTbl %>%
+  kable() %>%
+  kable_styling()
+
+```
+
+```{r table1}
+
+df %>%
+  dplyr::select(
+    -RANID,
+    -InitExamDate,
+    -BaseExamDate,
+    -InitBMDDate,
+    -BaseBMDDate,
+    -AgeInit,
+    -BMDInit,
+    -BMIInit,
+    -APOE,
+    -DEM_SURVDATE,
+    -SurvTime,
+    -DEM_STATUS,
+    -AD_STATUS,
+    -VAD_STATUS,
+    -AGE6, -AGE8, -AGE20, -AGE24,
+    -ATT6, -ATT8, -ATT20, -ATT24,
+    -DATE6, -DATE8, -DATE20, -DATE24
+  ) %>%
+  relocate(
+    AgeBase,
+    Estrogen,
+    EstrogenUse,
+    Cohort,
+    BoneLoss,
+    BoneLossHighestQuartileLabels,
+    BoneLossHighestQuartile,
+    BMDBase,
+    BMDBaseLowestQuartileLabels,
+    BMDBaseLowestQuartile,
+    CurrentSmoker,
+    BMIBase,
+    APOEStatus,
+    Mobility,
+    DemStatus3,
+    DemStatus5,
+    DemStatus10,
+    ADStatus3,
+    ADStatus5,
+    ADStatus10
+  ) %>%
+  tbl_summary(by = 'Sex',
+              missing_text = 'Missing',
+              label = list(
+                AgeBase = 'Age',
+                BoneLoss = 'Bone Loss',
+                BMDBase = 'Baseline BMD',
+                CurrentSmoker = 'Current Smoker',
+                BMIBase = 'BMI',
+                APOEStatus = 'At least one e4 allele',
+                DemStatus3 = 'Dementia @ 3 years',
+                DemStatus5 = 'Dementia @ 5 years',
+                DemStatus10 = 'Dementia @ 10 years',
+                ADStatus3 = 'AD @ 3 years',
+                ADStatus5 = 'AD @ 5 years',
+                ADStatus10 = 'AD @ 10 years'
+              )) #%>%
+  # as_flex_table() %>%
+  # flextable::font(fontname = 'Arial', part = 'all') %>%
+  # flextable::save_as_docx(path = paste0(home_dir, '/worddocs/Table1_', gsub('-', '_', Sys.Date()), '.docx'))
+
+```
+
+```{r params}
+tbl2 <- tbl3 <- tbl4 <- tblS1 <- tblS2 <- tblS3 <- data.frame(
+  Table = character(),
+  Model = character(),
+  Outcome = character(),
+  BaselineBMD = character(),
+  Age = character(),
+  APOE = character(),
+  BMI = character(),
+  Estrogen = character(),
+  Mobility = character(),
+  OtherBMD = character(),
+  Sex = character(),
+  Smoke = character(),
+  stringsAsFactors = FALSE
+)
+
+tbl2 <- tbl2 %>%
+  add_row(
+    Table = '2',
+    Model = NA,
+    Outcome = 'DemStatus10',
+    BaselineBMD = 'BMDBase',
+    Age = 'AgeBase',
+    APOE = 'APOEStatus',
+    BMI = 'BMIBase',
+    Estrogen = NA,
+    Mobility = 'Mobility',
+    OtherBMD = NA,
+    Sex = 'Sex',
+    Smoke = NA
+  ) %>%
+  slice(rep(1:n(), each = 7)) %>%
+  dplyr::mutate(Row = row_number(),
+         Model = case_when(
+           Row == 1 ~ '1.1',
+           Row == 2 ~ '1.2',
+           Row == 3 ~ '1.3',
+           Row == 4 ~ '2.1',
+           Row == 5 ~ '2.2',
+           Row == 6 ~ '2.3',
+           Row == 7 ~ '3'
+         ),
+         BaselineBMD = case_when(
+           Row == 2 ~ 'BMDBaseLowestQuartileLabels',
+           Row == 3 ~ 'BMDBaseLowestQuartile',
+           Row == 4 ~ 'BoneLoss',
+           Row == 5 ~ 'BoneLossHighestQuartileLabels',
+           Row == 6 ~ 'BoneLossHighestQuartile',
+           TRUE ~ BaselineBMD
+         ),
+         OtherBMD = case_when(
+           Row == 7 ~ 'BoneLoss',
+           TRUE ~ OtherBMD
+         ))
+
+kinship_df <- read_file_by_ext(f = list.files(pattern = 'ped', path = data_dir),
+                               path = data_dir) %>%
+  dplyr::rename_with(toupper) %>%
+  mutate(Sex = ifelse(SEX == 1, 'Male', 'Female')) %>%
+  dplyr::select(-SEX)
+maxped = max(kinship_df$PEDNO) # 1542
+missing_id.loss <- as.numeric(setdiff(df$RANID, kinship_df$RANID))
+nmiss = length(missing_id.loss)
+missing_sex.loss <- df$Sex[df$RANID %in% missing_id.loss]
+missing_ped.loss <- data.frame(PEDNO = (maxped+1):(maxped+nmiss), 
+                               RANID = missing_id.loss, 
+                               FATHER = NA, 
+                               MOTHER = NA, 
+                               Sex = missing_sex.loss, 
+                               ITWIN = NA)
+ped_all.l <- rbind(kinship_df, missing_ped.loss)
+ped.l <- with(ped_all.l, pedigree(id = RANID, FATHER, MOTHER, sex = Sex, famid = PEDNO))
+kmat.l <- kinship(ped.l)
+kmat1.l <-as.matrix(kmat.l)
+ids <- colnames(kmat1.l) %in% df$RANID
+kmat.test <- kmat.l[ids, ids]
+
+results <- lapply(1:nrow(tbl2), function(row) fit_model(tbl2[row, ], kinship_matrix = kmat.test, df = df))
+resultsDf <- do.call(rbind, results) %>%
+  as.data.frame() 
+resultsDf %>%
+  kable() %>%
+  pack_rows(index = table(resultsDf$Model)) %>%
+  kable_styling()
+```
+
+```{r tbl2_w_ageQuartiles}
+
+tbl2_w_ageQuartiles <- tbl2 %>%
+  mutate(Age = case_when(
+    Age == 'AgeBase' ~ 'AgeBaseQuartiles',
+    TRUE ~ Age)
+  )
+
+results2 <- lapply(1:nrow(tbl2_w_ageQuartiles), function(row) fit_model(tbl2_w_ageQuartiles[row, ], kinship_matrix = kmat.test, df = df))
+resultsDf2 <- do.call(rbind, results2) %>%
+  as.data.frame() 
+resultsDf2 %>%
+  kable() %>%
+  pack_rows(index = table(resultsDf2$Model)) %>%
+  kable_styling()
+```
+
+```{r dementia_y3, eval = F}
+tbl2_dem_y3 <- tbl2 %>%
+  mutate(Outcome = case_when(
+    Outcome == 'DemStatus' ~ '',
+    TRUE ~ Outcome)
+  )
+```
+
+```{r dementia_y5, eval = F}
+tbl2_dem_y5
+```

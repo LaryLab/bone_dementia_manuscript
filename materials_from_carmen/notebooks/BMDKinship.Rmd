@@ -1,0 +1,374 @@
+---
+title: "BMD Kinship"
+date: "last updated `r format(Sys.time(), '%d %B, %Y')`"
+knit: (function(inputFile, encoding) { 
+      out_dir <- 'output';
+      rmarkdown::render(inputFile,
+                        encoding=encoding, 
+                        output_file=file.path(dirname(inputFile), 
+                        out_dir, 'BMDKinship.html')) 
+                        })
+output: 
+  html_document:
+    css: ~/ckhoo/style.css
+    toc: TRUE
+    toc_float: TRUE
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, 
+                      cache = FALSE,
+                      fig.height = 5,
+                      fig.width = 7.5,
+                      units = 'in',
+                      fig.show = 'hold')
+invisible(sapply(list.files(
+  pattern = '(directories|modules|utils|^BMDKinship.R$)',
+  recursive = TRUE,
+  full.names = TRUE),
+function(f)
+  sys.source(f, env = attach(NULL))))
+```
+
+# Documentation
+
+* `BMDKinshipSetup.R` generates two data frames:
+  1. `param_grid` captures the most updated models in the manuscript as of <b>April 4, 2022</b>. The output is saved to `./Data/BMDParamGrid.rds`.
+  2. `data` contains both original and created variables used in the analyses. The output is saved to `./Data/BMDKinship.rds`.
+
+# Results
+
+```{r data, eval = T}
+# data <- readRDS(paste0(data_subdir, 'BMDKinship.rds'))
+# param_grid <- readRDS(paste0(data_subdir, 'BMDParamGrid.rds'))
+# datatable(param_grid)
+
+results <- readRDS(paste0(res_subdir, 'BMDKinshipResults-Corrected.rds'))
+# TO BE ADDED TO MAIN RESULTS SOON!
+ageQ4Results <- readRDS(paste0(res_subdir, 'BMDKinshipResults-AgeQ4.rds'))
+results <- rbind(results, ageQ4Results)
+results <- results %>%
+  relocate(Table, Model, Variable, `Hazard Ratio`)
+```
+
+## Table 1
+```{r table1, eval = T, echo = F}
+
+tbl1 <- data %>%
+  dplyr::select(
+    AGECONTS,
+    SEX,
+    SEXEstrogen,
+    Cohort,
+    BMDPERCENTPERYEAR,
+    BMDPCTQUARTILE4,
+    BMDBASE,
+    CURRENTSMOKER,
+    BMIBASE,
+    APOE4STAT,
+    HELPTRANSFERRING,
+    DEMSTATUS10,
+    ADSTATUS10
+  ) %>%
+  tbl_summary(
+    by = 'SEX',
+    label = list(
+      DEMSTATUS10 ~ "Dementia",
+      BMDBASE ~ "Baseline BMD (g/cm\u00B2)",
+      BMDPERCENTPERYEAR ~ 'Bone Loss (%/year)',
+      BMDPCTQUARTILE4 ~ "Bone Loss Q4",
+      ADSTATUS10 ~ "Alzheimer's Disease",
+      AGECONTS ~ "Age (Years)",
+      APOE4STAT ~ "\u22651 APOE \u03B54 alleles",
+      CURRENTSMOKER ~ "Current Smoker",
+      BMIBASE ~ "BMI",
+      SEXEstrogen ~ "Estrogen Use",
+      HELPTRANSFERRING ~ "Need Help Transferring (Mobility)"
+    ),
+    missing_text = 'Missing'
+  ) 
+
+tbl1 %>%
+  as_flex_table() %>%
+  flextable::font(fontname = 'Arial', part = 'all') #%>%
+  # flextable::save_as_docx(path = paste0(word_path, 'BMDTable1.docx'))
+```
+
+```{r output, eval = T}
+output_df <- relabelOutput(results)
+# datatable(output_df)
+output_df <- output_df %>%
+  dplyr::rename('Parametrization' = 'Variable',
+                'Hazard Ratio (95% CI, p-value)' = 'Hazard Ratio') %>%
+  mutate(
+    Parametrization = case_when(
+      Parametrization == 'Baseline BMD (g/cm\u00B2)' &
+        grepl('(1.1|Male|Female)', Model) ~
+        'continuous (g/cm\u00B2)',
+      Parametrization == 'Baseline BMD Quartile(0.866,0.974]' ~ 'Q2 vs. Q1',
+      Parametrization == 'Baseline BMD Quartile(0.77,0.866]' ~ 'Q3 vs. Q1',
+      Parametrization == 'Baseline BMD Quartile[0.345,0.77]' ~ 'Q4 vs. Q1',
+      Parametrization == 'Baseline BMD quartile 4 vs. quartiles 1-3Yes' ~
+        'Q4 vs. Q1-3',
+      Parametrization == 'Bone Loss' &
+        grepl('(2.1$|2.1:Male|2.1:Female)', Model) ~ 'continuous (% decline/year)',
+      Parametrization == 'Bone Loss' &
+        grepl('(2.1*|2.1*:Male|2.1*:Female)', Model) ~ 'continuous, age categorical',
+      Parametrization == 'Bone Loss Quartile(-0.228,0.222]' ~ 'Q2 vs. Q1',
+      Parametrization == 'Bone Loss Quartile(0.222,0.684]' ~ 'Q3 vs. Q1',
+      Parametrization == 'Bone Loss Quartile(0.684,4.86]' ~ 'Q4 vs. Q1',
+      Parametrization == 'Bone Loss quartile 4 vs. quartiles 1-3' ~
+        'Q4 vs. Q1-3',
+      TRUE ~ Parametrization
+    )
+  ) %>%
+  
+  mutate(
+    Exposure = case_when(
+      Model %in% paste0('1.', 1:3) ~ 'Baseline BMD',
+      Model == '3' ~ 'Baseline BMD and Bone Loss',
+      TRUE ~ 'Bone Loss'
+    )
+  ) %>%
+  relocate(Exposure, Model)
+# datatable(output_df)
+```
+
+## Table 2
+```{r table2, eval = T}
+# datatable(param_grid %>% filter(Table == '2'))
+# datatable(results %>% filter(Table == '2'))
+
+tbl2 <- output_df %>%
+  filter(Table == '2' & grepl('(continuous|Q|quartile|Loss|Baseline)', Parametrization)) %>%
+  mutate(Row = row_number()) %>%
+  mutate(Row = as.numeric(Row)) %>%
+  mutate(Row = case_when(
+    Row == 2 ~ 4,
+    Row == 4 ~ 2,
+    TRUE ~ Row
+  )) %>%
+  filter(Model != '2.1*') %>%
+  arrange(Row) %>%
+  dplyr::select(-Table, -Row) %>%
+  initial_table() %>%
+  flextable::merge_at(j = 1, i = 1:5, part = 'body') %>%
+  flextable::merge_at(j = 1, i = 6:10, part = 'body') %>%
+  flextable::merge_at(j = 1, i = 11:12, part = 'body') %>%
+  flextable::surround(i = c(5, 10), border.bottom = border_style) %>%
+  vline(j = 1, border = border_style)
+
+# tbl2 %>%
+#   save_as_docx(path = paste0(word_path, 'BMDTable2.docx'))
+
+tbl2
+```
+
+## Table 3
+<!-- previously Table S2 -->
+```{r table3, eval = T}
+# datatable(param_grid %>% filter(Table == 'S2'))
+# datatable(results %>% filter(Table == 'S2'))
+
+tbl3 <- output_df %>%
+  filter(Table == 'S2' & grepl('(continuous|Q|quartile|Loss|Baseline)', Parametrization)) %>%
+  separate(col = 'Model', into = c('Model', 'Sex'), sep=':') %>%
+  dplyr::select(-Table) %>%
+  relocate(Exposure, Sex, Model) %>%
+  arrange(Model, Sex) %>%
+  mutate(Row = as.numeric(row_number())) %>%
+  mutate(Row = case_when(
+           Row == 3 ~ 5,
+           Row == 5 ~ 3,
+           Row == 6 ~ 8,
+           Row == 8 ~ 6,
+           TRUE ~ Row
+  ),
+  Parametrization = case_when(
+    Model == '3' & grepl('(g.*)', Parametrization) ~
+      'Baseline BMD (g/cm\u00B2)',
+    TRUE ~ Parametrization
+  ),
+  Exposure = case_when(
+    grepl('^1.*', Model) ~ 'Baseline BMD',
+    grepl('^2.*', Model) ~ 'Bone Loss',
+    Model == '3' ~ 'Baseline BMD and Bone Loss'
+  )) %>%
+  filter(Model != '2.1*') %>%
+  arrange(Row) %>%
+  dplyr::select(-Row)
+
+tbl3 <- tbl3 %>%
+  initial_table() %>%
+  flextable::merge_at(j = 1, i = 1:10, part = 'body') %>%
+  flextable::merge_at(j = 1, i = 11:20, part = 'body') %>%
+  flextable::merge_at(j = 1, i = 21:24, part = 'body') %>%
+  flextable::surround(i = c(10, 20),
+                      border.bottom = border_style) %>%
+  vline(j = 1, border = border_style)
+
+# tblS2 %>%
+#   save_as_docx(path = paste0(word_path, 'BMDTableS2.docx'))
+
+tbl3
+```
+
+## Table 4
+<!-- previously Table 3 -->
+
+```{r table4, eval = T}
+# datatable(param_grid %>% filter(Table == '3'))
+# datatable(results %>% filter(Table == '3'))
+
+tbl4 <- output_df %>%
+  filter(Table == '3' &
+           grepl('(continuous|Q|quartile|Loss|Baseline)', Parametrization)) %>%
+  filter(!grepl('5.*(74|79)', Model)) %>%
+  filter(!(
+    grepl('(^4$|^5$|6:.*)', Model) &
+      grepl('^Bone Loss$', Parametrization)
+  )) %>%
+  filter(!(grepl('6', Model) & !grepl('x', Parametrization))) %>%
+  mutate(Table = case_when(Table == '3' ~ '4', TRUE ~ Table)) %>%
+  mutate(
+    Parametrization = gsub(
+      'quartile 4 vs. quartiles 1-3Yes',
+      '(Q4 vs. Q1-3)',
+      Parametrization),
+      Model = case_when(
+        grepl('Age Q4', Model) ~ '5: age >= 79',
+        grepl('Age Q1', Model) ~ '5: age < 79',
+        TRUE ~ Model
+      )
+    ) %>%
+      dplyr::select(-Table) %>%
+      arrange(Exposure, Model
+      ) %>%
+  separate(., 'Hazard Ratio (95% CI, p-value)',
+           into = c('Hazard Ratio (95% CI)', 'p-value'),
+           sep = ',') %>%
+  mutate(`p-value` = gsub('p=', '', `p-value`),
+         `p-value` = gsub(')', '', `p-value`),
+         `Hazard Ratio (95% CI)` = case_when(
+           grepl('x', Parametrization) ~ '',
+           TRUE ~ `Hazard Ratio (95% CI)`)) 
+
+tbl4 <- tbl4 %>%
+  initial_table() %>%
+  flextable::merge_at(j = 1, i = 1:nrow(tbl4), part = 'body') %>%
+  flextable::surround(i = c(3, 6), border.bottom = border_style) %>%
+  vline(j = 1, border = border_style)
+
+# tbl3 %>%
+#   save_as_docx(path = paste0(word_path, 'BMDTable3-Corrected.docx'))
+
+tbl4
+
+```
+
+## Table S1
+<!-- previously Table S3 -->
+```{r tableS1, eval = T}
+# datatable(param_grid %>% filter(Table == 'S3'))
+# datatable(results %>% filter(Table == 'S3'))
+
+tblS1 <- output_df %>%
+  filter(Table == 'S3' & grepl('(continuous|Q|quartile|Loss|Baseline)', Parametrization)) %>%
+  dplyr::select(-Table) %>%
+  mutate(Row = row_number()) %>%
+  mutate(Row = as.numeric(Row)) %>%
+  mutate(Row = case_when(
+    Row == 2 ~ 4,
+    Row == 4 ~ 2,
+    TRUE ~ Row
+  )) %>%
+  arrange(Row) %>%
+  dplyr::select(-Row) %>%
+  initial_table() %>% 
+  flextable::merge_at(j = 1, i = 1:5, part = 'body') %>%
+  flextable::merge_at(j = 1, i = 6:11, part = 'body') %>%
+  flextable::merge_at(j = 1, i = 12:13, part = 'body') %>%
+  flextable::surround(i = c(5, 11), border.bottom = border_style) %>%
+  vline(j = 1, border = border_style)
+  
+# tblS3 %>%
+#   save_as_docx(path = paste0(word_path, 'BMDTableS3.docx'))
+
+tblS1
+```
+
+## Table S2
+<!-- previously Table S1 -->
+
+```{r tableS2, eval = T}
+tblS2 <- output_df %>%
+  filter(Table == 'S1' & grepl('version.*\\*', Model) & grepl('BMD', Parametrization)) %>%
+  mutate(Model = case_when(grepl('version 2', Model) ~ '7',
+                           grepl('version 3', Model) ~ '8',
+                           TRUE ~ Model))
+
+tblS2 <- tblS2 %>%
+  mutate(
+    Exposure = case_when(
+      Parametrization == 'BMDDELTA' ~ '\u0394BMD',
+      Parametrization == 'BMDDELTANorm' ~ '\u0394BMD (Normalized)',
+      TRUE ~ Parametrization
+    )
+  ) %>%
+  dplyr::select(-Table,-Parametrization) %>%
+  relocate(Model, Exposure) %>%
+  initial_table() %>%
+  flextable::merge_at(j = 1, i = 1, part = 'body') %>%
+  flextable::merge_at(j = 1, i = 2:3, part = 'body') %>%
+  flextable::surround(i = 1, border.bottom = border_style)
+
+# tblS1 %>%
+#   save_as_docx(path = paste0(word_path, 'BMDTableS1.docx'))
+
+tblS2
+
+```
+
+## Table S3
+<!-- previously S5 -->
+```{r tableS3, eval = T}
+# datatable(param_grid %>% filter(Table == 'S5'))
+# datatable(results %>% filter(Table == 'S5'))
+
+tblS3 <- output_df %>%
+  filter(Table == 'S5' & grepl('(1.1|2.1$)', Model)) %>% #  & grepl('(continuous|quartile|Loss|Baseline)', Parametrization)
+  dplyr::select(-Table) %>%
+  initial_table() %>%
+  flextable::merge_at(j = 1, i = 1:8, part = 'body') %>%
+  # flextable::merge_at(j = 1, i = 6:11, part = 'body') %>%
+  # flextable::merge_at(j = 1, i = 12:13, part = 'body') %>%
+  flextable::surround(i = c(8), border.bottom = border_style) %>%
+  vline(j = 1, border = border_style) 
+
+# tblS5 %>%
+#   save_as_docx(path = paste0(word_path, 'BMDTableS5.docx'))
+
+tblS3
+```
+
+<!-- ## Table S4 -->
+
+```{r tableS4, eval = F}
+# datatable(param_grid %>% filter(Table == 'S4'))
+# datatable(results %>% filter(Table == 'S4'))
+
+tblS4 <- output_df %>%
+  filter(Table == 'S4' & grepl('(continuous|quartile|Loss|Baseline)', Parametrization)) %>%
+  dplyr::select(-Table) %>%
+  initial_table() %>%
+  flextable::merge_at(j = 1, i = 1:5, part = 'body') %>%
+  flextable::merge_at(j = 1, i = 6:11, part = 'body') %>%
+  flextable::merge_at(j = 1, i = 12:13, part = 'body') %>%
+  flextable::surround(i = c(1, 4, 5, 6, 7, 10, 11, 13), border.bottom = border_style) %>%
+  vline(j = 1, border = border_style) 
+
+# tblS4 %>%
+#   save_as_docx(path = paste0(word_path, 'BMDTableS4.docx'))
+
+tblS4
+```

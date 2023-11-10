@@ -1,0 +1,155 @@
+---
+title: "Single BMD Analysis"
+date: "last updated `r format(Sys.time(), '%d %B, %Y')`"
+knit: (function(inputFile, encoding) { 
+      out_dir <- 'output';
+      rmarkdown::render(inputFile,
+                        encoding=encoding, 
+                        output_file=file.path(dirname(dirname(inputFile)), 
+                        out_dir, 'SingleBMDAnalysis.html')) 
+                        })
+output: 
+  html_document:
+    css: ~/cobre-dementia/style.css
+    toc: TRUE
+    toc_float: TRUE
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = FALSE, 
+                      cache = FALSE,
+                      fig.height = 20,
+                      fig.width = 20,
+                      units = 'in',
+                      fig.show = 'hold'
+                      )
+
+librarian::shelf(dplyr,
+                 gtsummary,
+                 kable,
+                 kableExtra,
+                 plyr,
+                 tidyverse)
+
+home_dir <- '/home/ckhoo@mehealth.org/cobre-dementia'
+data_dir <- paste(home_dir, 'data', sep = '/')
+fig_dir <- paste(home_dir, 'figures', sep = '/')
+res_dir <- paste(home_dir, 'results', sep = '/')
+sys.source(paste(home_dir, 'scripts/utils.R', sep = '/'))
+
+```
+
+```{r data}
+
+# Data preprocessing steps can be found in:
+# - 01_Setup_for_SingleBMD.R
+# - 02_Analysis_for_SingleBMD.R
+data <- readRDS(paste(data_dir, 'SingleBMD.rds', sep = '/'))
+# data <- data %>%
+#   # Rename quartiles for readability.
+#   mutate(BMDInitLowestQuartileLabels = recode(
+#     BMDInitLowestQuartileLabels,
+#     `[0.182,0.723]` = 'Q4 [0.182,0.723]',
+#     `(0.723,0.823]` = 'Q3 (0.723,0.823]',
+#     `(0.823,0.925]` = 'Q2 (0.823,0.925]',
+#     `(0.925,1.56]` = 'Q1 (0.925,1.56]'
+#   ))
+
+```
+
+# Table 1
+
+```{r tbl1}
+
+data %>%
+  dplyr::select(
+    Sex,
+    AgeInit,
+    EstrogenUse,
+    Cohort,
+    BMDInit,
+    BMDInitLowestQuartileLabels,
+    CurrentSmoker,
+    BMIInit,
+    APOEStatus,
+    Mobility,
+    matches('(Dem|AD)Status')
+  ) %>%
+  gtsummary::tbl_summary(
+    by = 'Sex',
+    missing_text = 'Missing',
+    label = list(
+      AgeInit ~ 'Age at Initial Visit (years)',
+      EstrogenUse ~ 'Estrogen',
+      BMDInit ~ 'Initial BMD (g/cm\u00B2)',
+      BMDInitLowestQuartileLabels ~ 'Initial BMD Quartiles',
+      CurrentSmoker ~ 'Current Smoker',
+      BMIInit ~ 'BMI at Initial Visit',
+      APOEStatus ~ '\u22651 APOE \u03B54 allele',
+      DemStatus3 ~ 'Dementia Status at Year 3',
+      DemStatus5 ~ 'Dementia Status at Year 5',
+      DemStatus10 ~ 'Dementia Status at Year 10',
+      ADStatus3 ~ 'AD Status at Year 3',
+      ADStatus5 ~ 'AD Status at Year 5',
+      ADStatus10 ~ 'AD Status at Year 10'
+    )
+  )
+
+```
+
+# Table 2
+
+```{r tbl2}
+
+tbl2_results <- readRDS(paste(res_dir, 'SingleBMD_Table2.rds', sep = '/'))
+
+tbl2_results %>%
+  mutate(Variable = case_when(
+    Variable == 'AgeInit' ~ 'Age at Initial Visit',
+    Variable == 'APOEStatus' ~ '\u22651 APOE \u03B54 allele',
+    Variable == 'BMIInit' ~ 'BMI at Initial Visit',
+    Variable == 'BMDInitLowestQuartileYes' ~ 'Initial BMD Lowest Quartile',
+    Variable == 'MobilityYes Help' ~ 'Need Help Transferring',
+    Variable == 'SexMale' ~ 'Male',
+    TRUE ~ Variable
+  )) %>%
+  mutate(Variable = gsub('LowestQuartileLabels', ' ', Variable)) %>%
+  mutate(Variable = gsub('BMDInit', 'Initial BMD', Variable)) %>%
+  kable() %>%
+  kable_styling() %>%
+  row_spec(grep('BMD', tbl2_results$Variable),
+           bold = T,
+           background = 'paleturquoise')
+
+```
+
+# Table 3
+
+```{r tbl3}
+
+tbl3_results <- readRDS(paste(res_dir, 'SingleBMD_Table3.rds', sep = '/'))
+
+tbl3_results %>%
+  kable() %>%
+  kable_styling() %>%
+  row_spec(grep('BMD', tbl3_results$Variable),
+           bold = T,
+           background = 'paleturquoise')
+
+```
+
+# Table 4
+
+```{r tbl4}
+
+tbl4_results <- readRDS(paste(res_dir, 'SingleBMD_Table4.rds', sep = '/'))
+
+tbl4_results %>%
+  kable() %>%
+  kable_styling() %>%
+  row_spec(grep('BMD', tbl4_results$Variable),
+           bold = T,
+           background = 'paleturquoise')
+
+```

@@ -1,0 +1,86 @@
+---
+title: "Meta-Analysis"
+date: "last updated `r format(Sys.time(), '%d %B, %Y')`"
+knit: (function(inputFile, encoding) { 
+      out_dir <- 'output';
+      rmarkdown::render(inputFile,
+                        encoding=encoding, 
+                        output_file=file.path(dirname(dirname(inputFile)), 
+                        out_dir, 'MetaAnalysis.html')) 
+                        })
+output: 
+  html_document:
+    css: ~/BMD/style.css
+    toc: TRUE
+    toc_float: TRUE
+---
+
+```{r setup, include=FALSE}
+
+knitr::opts_chunk$set(echo = FALSE, 
+                      cache = FALSE
+                      )
+librarian::shelf(coxme,
+                 dplyr,
+                 grid,
+                 kable,
+                 kableExtra,
+                 kinship2,
+                 meta)
+
+home_dir='/home/ckhoo@mmcf.mehealth.org/BMD'
+data_dir=paste(home_dir, 'data', sep = '/')
+fig_dir=paste(home_dir, 'figures', sep = '/')
+output_dir=paste(home_dir, 'output', sep = '/')
+res_dir=paste(home_dir, 'results', sep = '/')
+```
+
+```{r results}
+framingham <-
+  readRDS(paste(res_dir, 'BoneLoss_Table2_NoMobility.rds', sep = '/'))
+meta_analysis_df <- lapply(1:length(framingham), function(x) {
+  # Beta
+  beta_values <- framingham[[x]]$coef
+  # SE
+  se_values <- sqrt(diag(vcov(framingham[[x]])))
+  output <- data.frame('beta_F' = beta_values, 'se_F' = se_values) %>%
+    filter(grepl('(BMD|Bone)', rownames(.)))
+})
+```
+
+# Model 1.1
+```{r model_1p1}
+meta_analysis_df[[1]] <- cbind(meta_analysis_df[[1]], 'beta_R' = -.75106, 'se_R' = 0.57236) 
+
+meta_analysis_df[[1]] %>%
+  kable(caption = '_F denotes Framingham; _R denotes Rotterdam') %>% 
+  kable_styling()
+
+mdl_1p1 <- metagen(
+  TE = c(meta_analysis_df[[1]]$beta_F, meta_analysis_df[[1]]$beta_R),
+  seTE = c(meta_analysis_df[[1]]$se_F,  meta_analysis_df[[1]]$se_R)
+)
+summary(mdl_1p1)
+forest(mdl_1p1, digits = 4, colgap.forest = unit(0, 'mm'), fontfamily = "sans", colgap.studlab = unit(-5, "mm"))
+```
+
+# Model 2.1
+```{r model_2p1}
+meta_analysis_df[[4]] <- cbind(meta_analysis_df[[4]], 'beta_R' = 0.001458, 'se_R' = 0.039296)
+
+meta_analysis_df[[4]] %>%
+  kable(caption = '_F denotes Framingham; _R denotes Rotterdam') %>% 
+  kable_styling()
+
+mdl_2p1 <- metagen(
+  TE = c(meta_analysis_df[[4]]$beta_F, meta_analysis_df[[4]]$beta_R),
+  seTE = c(meta_analysis_df[[4]]$se_F,  meta_analysis_df[[4]]$se_R)
+)
+summary(mdl_2p1)
+forest(mdl_2p1, digits = 4)
+```
+
+# Model 3
+```{r model_3}
+
+```
